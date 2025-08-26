@@ -1,0 +1,19 @@
+{
+  "bindingCulture": {
+    "name": "en-us"
+  },
+  "language": {
+    "feature": "en-us"
+  },
+  "stepAssemblies": [
+    { "assembly": "OrangeHRM.Tests" }
+  ],
+  "parallel": {
+    "workers": 3,
+    "mode": "feature"
+  },
+  "livingDocGenerator": {
+    "enabled": true,
+    "filePath": "{CurrentDirectory}\\TestExecution.json"
+  }
+}
