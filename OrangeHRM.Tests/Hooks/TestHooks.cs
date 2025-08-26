@@ -1,9 +1,6 @@
 using AventStack.ExtentReports;
-using Microsoft.Playwright;
 using OrangeHRM.Tests.Drivers;
 using OrangeHRM.Tests.Utils;
-using System;
-using System.Threading.Tasks;
 using TechTalk.SpecFlow;
 
 namespace OrangeHRM.Tests.Hooks
@@ -27,13 +24,15 @@ namespace OrangeHRM.Tests.Hooks
         {
             try
             {
+                Console.WriteLine("Initializing test run...");
                 // Initialize the report
                 ReportingUtil.GetExtentReports();
+                Console.WriteLine("Test run initialized successfully");
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Failed to initialize reporting: {ex.Message}");
-                throw;
+                // Don't throw here as reporting shouldn't break tests
             }
         }
 
@@ -42,8 +41,10 @@ namespace OrangeHRM.Tests.Hooks
         {
             try
             {
+                Console.WriteLine("Finalizing test run...");
                 // Flush the report
                 ReportingUtil.FlushReport();
+                Console.WriteLine("Test run finalized successfully");
             }
             catch (Exception ex)
             {
@@ -56,8 +57,8 @@ namespace OrangeHRM.Tests.Hooks
         {
             try
             {
-                // Create feature in the report
                 var featureTitle = featureContext?.FeatureInfo?.Title ?? "Unknown Feature";
+                Console.WriteLine($"Starting feature: {featureTitle}");
                 ReportingUtil.CreateFeature(featureTitle);
             }
             catch (Exception ex)
@@ -71,8 +72,8 @@ namespace OrangeHRM.Tests.Hooks
         {
             try
             {
-                // Create scenario in the report
                 var scenarioTitle = _scenarioContext?.ScenarioInfo?.Title ?? "Unknown Scenario";
+                Console.WriteLine($"Starting scenario: {scenarioTitle}");
                 ReportingUtil.CreateScenario(scenarioTitle);
             }
             catch (Exception ex)
@@ -89,13 +90,15 @@ namespace OrangeHRM.Tests.Hooks
                 // Check if step context is available
                 if (ScenarioStepContext.Current?.StepInfo == null)
                 {
-                    Console.WriteLine("Step context not available");
+                    Console.WriteLine("Step context not available, skipping step reporting");
                     return;
                 }
 
                 var stepInfo = ScenarioStepContext.Current.StepInfo;
                 var stepType = stepInfo.StepDefinitionType.ToString();
                 var stepText = stepInfo.Text ?? "Unknown Step";
+
+                Console.WriteLine($"Processing step: {stepType} {stepText}");
 
                 // Determine step status
                 Status stepStatus;
@@ -105,10 +108,12 @@ namespace OrangeHRM.Tests.Hooks
                 if (error == null)
                 {
                     stepStatus = Status.Pass;
+                    Console.WriteLine("Step passed");
                 }
                 else
                 {
                     stepStatus = Status.Fail;
+                    Console.WriteLine($"Step failed: {error.Message}");
 
                     // Capture screenshot on failure
                     try
@@ -118,6 +123,8 @@ namespace OrangeHRM.Tests.Hooks
                         screenshotPath = await ScreenshotUtil.CaptureScreenshotAsync(
                             _playwrightDriver.Page,
                             $"Error_{sanitizedTitle}_{DateTime.Now:yyyyMMdd_HHmmss}");
+
+                        Console.WriteLine($"Error screenshot captured: {screenshotPath}");
                     }
                     catch (Exception screenshotEx)
                     {
@@ -157,25 +164,36 @@ namespace OrangeHRM.Tests.Hooks
         {
             try
             {
-                // Take screenshot after each scenario for documentation
+                var scenarioTitle = _scenarioContext?.ScenarioInfo?.Title ?? "Unknown";
+                Console.WriteLine($"Completing scenario: {scenarioTitle}");
+
+                // Take screenshot after each scenario for documentation (only if no error)
                 if (_scenarioContext.TestError == null)
                 {
-                    var scenarioTitle = _scenarioContext?.ScenarioInfo?.Title ?? "Unknown";
-                    var sanitizedTitle = SanitizeFileName(scenarioTitle);
-
-                    var screenshotPath = await ScreenshotUtil.CaptureScreenshotAsync(
-                        _playwrightDriver.Page,
-                        $"Final_{sanitizedTitle}_{DateTime.Now:yyyyMMdd_HHmmss}");
-
-                    if (!string.IsNullOrEmpty(screenshotPath))
+                    try
                     {
-                        ReportingUtil.LogScreenshot(screenshotPath);
+                        var sanitizedTitle = SanitizeFileName(scenarioTitle);
+                        var screenshotPath = await ScreenshotUtil.CaptureScreenshotAsync(
+                            _playwrightDriver.Page,
+                            $"Final_{sanitizedTitle}_{DateTime.Now:yyyyMMdd_HHmmss}");
+
+                        if (!string.IsNullOrEmpty(screenshotPath))
+                        {
+                            ReportingUtil.LogScreenshot(screenshotPath);
+                            Console.WriteLine($"Final screenshot captured: {screenshotPath}");
+                        }
+                    }
+                    catch (Exception screenshotEx)
+                    {
+                        Console.WriteLine($"Failed to capture final screenshot: {screenshotEx.Message}");
                     }
                 }
+
+                Console.WriteLine($"Scenario completed: {scenarioTitle}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Failed to capture final screenshot: {ex.Message}");
+                Console.WriteLine($"Failed to complete scenario: {ex.Message}");
             }
         }
 
