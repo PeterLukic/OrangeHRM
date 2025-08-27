@@ -1,6 +1,9 @@
-using AventStack.ExtentReports;
+﻿using AventStack.ExtentReports;
+using Microsoft.Playwright;
 using OrangeHRM.Tests.Drivers;
 using OrangeHRM.Tests.Utils;
+using System;
+using System.Threading.Tasks;
 using TechTalk.SpecFlow;
 
 namespace OrangeHRM.Tests.Hooks
@@ -24,15 +27,13 @@ namespace OrangeHRM.Tests.Hooks
         {
             try
             {
-                Console.WriteLine("Initializing test run...");
-                // Initialize the report
+                Console.WriteLine("=== INITIALIZING TEST RUN ===");
                 ReportingUtil.GetExtentReports();
-                Console.WriteLine("Test run initialized successfully");
+                Console.WriteLine("=== TEST RUN INITIALIZED ===");
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Failed to initialize reporting: {ex.Message}");
-                // Don't throw here as reporting shouldn't break tests
             }
         }
 
@@ -41,10 +42,9 @@ namespace OrangeHRM.Tests.Hooks
         {
             try
             {
-                Console.WriteLine("Finalizing test run...");
-                // Flush the report
+                Console.WriteLine("=== FINALIZING TEST RUN ===");
                 ReportingUtil.FlushReport();
-                Console.WriteLine("Test run finalized successfully");
+                Console.WriteLine("=== TEST RUN FINALIZED ===");
             }
             catch (Exception ex)
             {
@@ -58,7 +58,7 @@ namespace OrangeHRM.Tests.Hooks
             try
             {
                 var featureTitle = featureContext?.FeatureInfo?.Title ?? "Unknown Feature";
-                Console.WriteLine($"Starting feature: {featureTitle}");
+                Console.WriteLine($"=== STARTING FEATURE: {featureTitle} ===");
                 ReportingUtil.CreateFeature(featureTitle);
             }
             catch (Exception ex)
@@ -73,7 +73,7 @@ namespace OrangeHRM.Tests.Hooks
             try
             {
                 var scenarioTitle = _scenarioContext?.ScenarioInfo?.Title ?? "Unknown Scenario";
-                Console.WriteLine($"Starting scenario: {scenarioTitle}");
+                Console.WriteLine($"=== STARTING SCENARIO: {scenarioTitle} ===");
                 ReportingUtil.CreateScenario(scenarioTitle);
             }
             catch (Exception ex)
@@ -87,18 +87,19 @@ namespace OrangeHRM.Tests.Hooks
         {
             try
             {
-                // Check if step context is available
-                if (ScenarioStepContext.Current?.StepInfo == null)
+                // Get current step information
+                var stepContext = ScenarioStepContext.Current;
+                if (stepContext?.StepInfo == null)
                 {
-                    Console.WriteLine("Step context not available, skipping step reporting");
+                    Console.WriteLine("⚠️ Step context not available");
                     return;
                 }
 
-                var stepInfo = ScenarioStepContext.Current.StepInfo;
+                var stepInfo = stepContext.StepInfo;
                 var stepType = stepInfo.StepDefinitionType.ToString();
                 var stepText = stepInfo.Text ?? "Unknown Step";
 
-                Console.WriteLine($"Processing step: {stepType} {stepText}");
+                Console.WriteLine($"📝 Processing step: {stepType} {stepText}");
 
                 // Determine step status
                 Status stepStatus;
@@ -108,12 +109,12 @@ namespace OrangeHRM.Tests.Hooks
                 if (error == null)
                 {
                     stepStatus = Status.Pass;
-                    Console.WriteLine("Step passed");
+                    Console.WriteLine($"✅ Step PASSED: {stepText}");
                 }
                 else
                 {
                     stepStatus = Status.Fail;
-                    Console.WriteLine($"Step failed: {error.Message}");
+                    Console.WriteLine($"❌ Step FAILED: {stepText} - {error.Message}");
 
                     // Capture screenshot on failure
                     try
@@ -124,38 +125,56 @@ namespace OrangeHRM.Tests.Hooks
                             _playwrightDriver.Page,
                             $"Error_{sanitizedTitle}_{DateTime.Now:yyyyMMdd_HHmmss}");
 
-                        Console.WriteLine($"Error screenshot captured: {screenshotPath}");
+                        Console.WriteLine($"📸 Error screenshot captured: {screenshotPath}");
                     }
                     catch (Exception screenshotEx)
                     {
-                        Console.WriteLine($"Failed to capture error screenshot: {screenshotEx.Message}");
+                        Console.WriteLine($"📸 Failed to capture error screenshot: {screenshotEx.Message}");
                     }
                 }
 
-                // Parse step type safely
+                // Parse and log step to report
                 if (Enum.TryParse<StepType>(stepType, out var parsedStepType))
                 {
-                    // Log step with status
+                    // Enhanced step details
+                    var stepDetails = error != null
+                        ? $"Error: {error.Message}"
+                        : "Completed successfully";
+
+                    // Log step with enhanced information
                     ReportingUtil.LogStep(
                         parsedStepType,
                         stepText,
                         stepStatus,
-                        error?.Message ?? "");
+                        stepDetails);
 
-                    // Log screenshot if captured
+                    // Add screenshot if captured
                     if (!string.IsNullOrEmpty(screenshotPath))
                     {
                         ReportingUtil.LogScreenshot(screenshotPath);
                     }
+
+                    // Add additional context information
+                    if (stepStatus == Status.Pass)
+                    {
+                        ReportingUtil.LogStepInfo($"Step executed successfully at {DateTime.Now:HH:mm:ss.fff}");
+                    }
+                    else
+                    {
+                        ReportingUtil.LogStepFailure(error?.Message ?? "Unknown error", error?.StackTrace ?? "");
+                    }
+
+                    Console.WriteLine($"📊 Step logged to report: {stepType} - {stepStatus}");
                 }
                 else
                 {
-                    Console.WriteLine($"Failed to parse step type: {stepType}");
+                    Console.WriteLine($"⚠️ Failed to parse step type: {stepType}");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Failed to process after step: {ex.Message}");
+                Console.WriteLine($"❌ Failed to process after step: {ex.Message}");
+                Console.WriteLine($"Stack trace: {ex.StackTrace}");
             }
         }
 
@@ -165,9 +184,11 @@ namespace OrangeHRM.Tests.Hooks
             try
             {
                 var scenarioTitle = _scenarioContext?.ScenarioInfo?.Title ?? "Unknown";
-                Console.WriteLine($"Completing scenario: {scenarioTitle}");
+                var scenarioStatus = _scenarioContext.TestError == null ? "PASSED" : "FAILED";
 
-                // Take screenshot after each scenario for documentation (only if no error)
+                Console.WriteLine($"=== COMPLETING SCENARIO: {scenarioTitle} - {scenarioStatus} ===");
+
+                // Take final screenshot if scenario passed
                 if (_scenarioContext.TestError == null)
                 {
                     try
@@ -180,20 +201,23 @@ namespace OrangeHRM.Tests.Hooks
                         if (!string.IsNullOrEmpty(screenshotPath))
                         {
                             ReportingUtil.LogScreenshot(screenshotPath);
-                            Console.WriteLine($"Final screenshot captured: {screenshotPath}");
+                            Console.WriteLine($"📸 Final screenshot captured: {screenshotPath}");
                         }
                     }
                     catch (Exception screenshotEx)
                     {
-                        Console.WriteLine($"Failed to capture final screenshot: {screenshotEx.Message}");
+                        Console.WriteLine($"📸 Failed to capture final screenshot: {screenshotEx.Message}");
                     }
                 }
 
-                Console.WriteLine($"Scenario completed: {scenarioTitle}");
+                // Reset current references for next scenario
+                ReportingUtil.ResetCurrentReferences();
+
+                Console.WriteLine($"=== SCENARIO COMPLETED: {scenarioTitle} ===");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Failed to complete scenario: {ex.Message}");
+                Console.WriteLine($"❌ Failed to complete scenario: {ex.Message}");
             }
         }
 
