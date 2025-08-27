@@ -2,16 +2,19 @@ using AventStack.ExtentReports;
 using AventStack.ExtentReports.Gherkin.Model;
 using AventStack.ExtentReports.Reporter;
 using System;
+using System.Collections.Concurrent;
 using System.IO;
+using System.Threading;
 
 namespace OrangeHRM.Tests.Utils
 {
     public class ReportingUtil
     {
         private static ExtentReports _extent;
-        private static ExtentTest _feature;
-        private static ExtentTest _scenario;
-        private static ExtentTest _currentStep; // Add this to track current step
+        private static readonly ConcurrentDictionary<string, ExtentTest> _features = new ConcurrentDictionary<string, ExtentTest>();
+        private static readonly ConcurrentDictionary<int, ExtentTest> _scenarios = new ConcurrentDictionary<int, ExtentTest>();
+        private static readonly ConcurrentDictionary<int, ExtentTest> _currentSteps = new ConcurrentDictionary<int, ExtentTest>();
+        private static readonly object _lockObject = new object();
 
         public static ExtentReports GetExtentReports()
         {
@@ -24,54 +27,82 @@ namespace OrangeHRM.Tests.Utils
 
         private static void InitializeReport()
         {
-            var reportPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TestResults", "Report");
-            Directory.CreateDirectory(reportPath);
+            lock (_lockObject)
+            {
+                if (_extent != null) return;
+                
+                var reportPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TestResults", "Report");
+                Directory.CreateDirectory(reportPath);
 
-            var htmlReporter = new ExtentHtmlReporter(Path.Combine(reportPath, $"TestReport_{DateTime.Now:yyyyMMdd_HHmmss}.html"));
+                var htmlReporter = new ExtentHtmlReporter(Path.Combine(reportPath, $"TestReport_{DateTime.Now:yyyyMMdd_HHmmss}.html"));
 
-            // Enhanced configuration for better step visibility
-            htmlReporter.Config.Theme = AventStack.ExtentReports.Reporter.Configuration.Theme.Dark;
-            htmlReporter.Config.DocumentTitle = "OrangeHRM Test Report";
-            htmlReporter.Config.ReportName = "OrangeHRM Automation Test Report";
-            //htmlReporter.Config.TimeStampFormat = "yyyy-MM-dd HH:mm:ss";
+                // Enhanced configuration for better step visibility
+                htmlReporter.Config.Theme = AventStack.ExtentReports.Reporter.Configuration.Theme.Dark;
+                htmlReporter.Config.DocumentTitle = "OrangeHRM Test Report";
+                htmlReporter.Config.ReportName = "OrangeHRM Automation Test Report";
+                //htmlReporter.Config.TimeStampFormat = "yyyy-MM-dd HH:mm:ss";
 
-            // Enable step details
-            htmlReporter.Config.EnableTimeline = true;
+                // Enable step details
+                htmlReporter.Config.EnableTimeline = true;
 
-            _extent = new ExtentReports();
-            _extent.AttachReporter(htmlReporter);
+                _extent = new ExtentReports();
+                _extent.AttachReporter(htmlReporter);
 
-            _extent.AddSystemInfo("Environment", "Test");
-            _extent.AddSystemInfo("Browser", "Chromium");
-            _extent.AddSystemInfo("OS", Environment.OSVersion.ToString());
-            _extent.AddSystemInfo("Framework", ".NET 8.0");
-            _extent.AddSystemInfo("Test Framework", "NUnit + SpecFlow");
+                _extent.AddSystemInfo("Environment", "Test");
+                _extent.AddSystemInfo("Browser", "Chromium");
+                _extent.AddSystemInfo("OS", Environment.OSVersion.ToString());
+                _extent.AddSystemInfo("Framework", ".NET 8.0");
+                _extent.AddSystemInfo("Test Framework", "NUnit + SpecFlow");
+            }
         }
 
         public static void CreateFeature(string featureName)
         {
-            _feature = GetExtentReports().CreateTest<Feature>(featureName);
-            Console.WriteLine($"[REPORT] Created feature: {featureName}");
+            try
+            {
+                if (_extent == null)
+                {
+                    InitializeReport();
+                }
+
+                var feature = _extent.CreateTest<Feature>(featureName);
+                _features[featureName] = feature;
+                Console.WriteLine($"[REPORT] Created feature: {featureName}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[REPORT] Error creating feature: {ex.Message}");
+            }
         }
 
-        public static void CreateScenario(string scenarioName)
+        public static void CreateScenario(string scenarioName, string featureName)
         {
-            if (_feature == null)
+            try
             {
-                Console.WriteLine("[REPORT] Warning: Feature is null, creating default feature");
-                CreateFeature("Unknown Feature");
-            }
+                if (!_features.TryGetValue(featureName, out var feature))
+                {
+                    CreateFeature(featureName);
+                    feature = _features[featureName];
+                }
 
-            _scenario = _feature.CreateNode<Scenario>(scenarioName);
-            Console.WriteLine($"[REPORT] Created scenario: {scenarioName}");
+                var scenario = feature.CreateNode<Scenario>(scenarioName);
+                int threadId = Thread.CurrentThread.ManagedThreadId;
+                _scenarios[threadId] = scenario;
+                Console.WriteLine($"[REPORT] Created scenario: {scenarioName} on thread {threadId}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[REPORT] Error creating scenario: {ex.Message}");
+            }
         }
 
         // Updated method to properly create and track steps
         public static void LogStep(StepType stepType, string stepName, Status status, string details = "")
         {
-            if (_scenario == null)
+            int threadId = Thread.CurrentThread.ManagedThreadId;
+            if (!_scenarios.TryGetValue(threadId, out var scenario))
             {
-                Console.WriteLine($"[REPORT] Warning: Scenario is null for step: {stepName}");
+                Console.WriteLine($"[REPORT] Warning: Scenario is null for step: {stepName} on thread {threadId}");
                 return;
             }
 
@@ -80,15 +111,15 @@ namespace OrangeHRM.Tests.Utils
                 // Create the step node based on type
                 ExtentTest step = stepType switch
                 {
-                    StepType.Given => _scenario.CreateNode<Given>(stepName),
-                    StepType.When => _scenario.CreateNode<When>(stepName),
-                    StepType.Then => _scenario.CreateNode<Then>(stepName),
-                    StepType.And => _scenario.CreateNode<And>(stepName),
-                    _ => _scenario.CreateNode<Given>(stepName)
+                    StepType.Given => scenario.CreateNode<Given>(stepName),
+                    StepType.When => scenario.CreateNode<When>(stepName),
+                    StepType.Then => scenario.CreateNode<Then>(stepName),
+                    StepType.And => scenario.CreateNode<And>(stepName),
+                    _ => scenario.CreateNode<Given>(stepName)
                 };
 
                 // Store reference for screenshots/additional logging
-                _currentStep = step;
+                _currentSteps[threadId] = step;
 
                 // Log the step with status and details
                 if (!string.IsNullOrEmpty(details))
@@ -103,7 +134,7 @@ namespace OrangeHRM.Tests.Utils
                 // Add timestamp
                 step.Info($"<i>Executed at: {DateTime.Now:HH:mm:ss.fff}</i>");
 
-                Console.WriteLine($"[REPORT] Logged step: {stepType} - {stepName} - {status}");
+                Console.WriteLine($"[REPORT] Logged step: {stepType} - {stepName} - {status} on thread {threadId}");
             }
             catch (Exception ex)
             {
@@ -114,24 +145,28 @@ namespace OrangeHRM.Tests.Utils
         // Alternative method for creating steps without immediate status (if needed)
         public static void CreateStep(StepType stepType, string stepName)
         {
-            if (_scenario == null)
+            int threadId = Thread.CurrentThread.ManagedThreadId;
+            
+            if (!_scenarios.TryGetValue(threadId, out var scenario))
             {
-                Console.WriteLine($"[REPORT] Warning: Scenario is null for step creation: {stepName}");
+                Console.WriteLine($"[REPORT] Warning: Scenario is null for step creation: {stepName} on thread {threadId}");
                 return;
             }
 
             try
             {
-                _currentStep = stepType switch
+                ExtentTest step = stepType switch
                 {
-                    StepType.Given => _scenario.CreateNode<Given>(stepName),
-                    StepType.When => _scenario.CreateNode<When>(stepName),
-                    StepType.Then => _scenario.CreateNode<Then>(stepName),
-                    StepType.And => _scenario.CreateNode<And>(stepName),
-                    _ => _scenario.CreateNode<Given>(stepName)
+                    StepType.Given => scenario.CreateNode<Given>(stepName),
+                    StepType.When => scenario.CreateNode<When>(stepName),
+                    StepType.Then => scenario.CreateNode<Then>(stepName),
+                    StepType.And => scenario.CreateNode<And>(stepName),
+                    _ => scenario.CreateNode<Given>(stepName)
                 };
+                
+                _currentSteps[threadId] = step;
 
-                Console.WriteLine($"[REPORT] Created step node: {stepType} - {stepName}");
+                Console.WriteLine($"[REPORT] Created step node: {stepType} - {stepName} on thread {threadId}");
             }
             catch (Exception ex)
             {
@@ -143,21 +178,23 @@ namespace OrangeHRM.Tests.Utils
         {
             try
             {
-                if (_currentStep != null)
+                int threadId = Thread.CurrentThread.ManagedThreadId;
+                
+                if (_currentSteps.TryGetValue(threadId, out var currentStep))
                 {
                     // Add screenshot to current step
-                    _currentStep.AddScreenCaptureFromPath(screenshotPath);
-                    Console.WriteLine($"[REPORT] Added screenshot to current step: {screenshotPath}");
+                    currentStep.AddScreenCaptureFromPath(screenshotPath);
+                    Console.WriteLine($"[REPORT] Added screenshot to current step: {screenshotPath} on thread {threadId}");
                 }
-                else if (_scenario != null)
+                else if (_scenarios.TryGetValue(threadId, out var scenario))
                 {
                     // Fallback: add to scenario
-                    _scenario.AddScreenCaptureFromPath(screenshotPath);
-                    Console.WriteLine($"[REPORT] Added screenshot to scenario: {screenshotPath}");
+                    scenario.AddScreenCaptureFromPath(screenshotPath);
+                    Console.WriteLine($"[REPORT] Added screenshot to scenario: {screenshotPath} on thread {threadId}");
                 }
                 else
                 {
-                    Console.WriteLine($"[REPORT] Warning: No active step or scenario for screenshot: {screenshotPath}");
+                    Console.WriteLine($"[REPORT] Warning: No active step or scenario for screenshot: {screenshotPath} on thread {threadId}");
                 }
             }
             catch (Exception ex)
@@ -171,13 +208,21 @@ namespace OrangeHRM.Tests.Utils
         {
             try
             {
-                if (_currentStep != null)
+                int threadId = Thread.CurrentThread.ManagedThreadId;
+                
+                if (_currentSteps.TryGetValue(threadId, out var currentStep))
                 {
-                    _currentStep.Info(info);
+                    currentStep.Info(info);
+                    Console.WriteLine($"[REPORT] Logged info to step on thread {threadId}");
                 }
-                else if (_scenario != null)
+                else if (_scenarios.TryGetValue(threadId, out var scenario))
                 {
-                    _scenario.Info(info);
+                    scenario.Info(info);
+                    Console.WriteLine($"[REPORT] Logged info to scenario on thread {threadId}");
+                }
+                else
+                {
+                    Console.WriteLine($"[REPORT] Warning: No active step or scenario for logging info on thread {threadId}");
                 }
             }
             catch (Exception ex)
@@ -191,17 +236,25 @@ namespace OrangeHRM.Tests.Utils
         {
             try
             {
-                if (_currentStep != null)
+                int threadId = Thread.CurrentThread.ManagedThreadId;
+                
+                if (_currentSteps.TryGetValue(threadId, out var currentStep))
                 {
-                    _currentStep.Fail($"<strong>Error:</strong> {errorMessage}");
+                    currentStep.Fail($"<strong>Error:</strong> {errorMessage}");
                     if (!string.IsNullOrEmpty(stackTrace))
                     {
-                        _currentStep.Fail($"<strong>Stack Trace:</strong><br/><pre>{stackTrace}</pre>");
+                        currentStep.Fail($"<strong>Stack Trace:</strong><br/><pre>{stackTrace}</pre>");
                     }
+                    Console.WriteLine($"[REPORT] Logged failure to step on thread {threadId}");
                 }
-                else if (_scenario != null)
+                else if (_scenarios.TryGetValue(threadId, out var scenario))
                 {
-                    _scenario.Fail($"<strong>Error:</strong> {errorMessage}");
+                    scenario.Fail($"<strong>Error:</strong> {errorMessage}");
+                    Console.WriteLine($"[REPORT] Logged failure to scenario on thread {threadId}");
+                }
+                else
+                {
+                    Console.WriteLine($"[REPORT] Warning: No active step or scenario for logging failure on thread {threadId}");
                 }
             }
             catch (Exception ex)
@@ -226,7 +279,9 @@ namespace OrangeHRM.Tests.Utils
         // Clean up references (optional, for memory management)
         public static void ResetCurrentReferences()
         {
-            _currentStep = null;
+            int threadId = Thread.CurrentThread.ManagedThreadId;
+            _currentSteps.TryRemove(threadId, out _);
+            Console.WriteLine($"[REPORT] Reset current references for thread {threadId}");
         }
     }
 

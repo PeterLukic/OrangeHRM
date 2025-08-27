@@ -73,8 +73,9 @@ namespace OrangeHRM.Tests.Hooks
             try
             {
                 var scenarioTitle = _scenarioContext?.ScenarioInfo?.Title ?? "Unknown Scenario";
-                Console.WriteLine($"=== STARTING SCENARIO: {scenarioTitle} ===");
-                ReportingUtil.CreateScenario(scenarioTitle);
+                var featureTitle = _featureContext?.FeatureInfo?.Title ?? "Unknown Feature";
+                Console.WriteLine($"=== STARTING SCENARIO: {scenarioTitle} IN FEATURE: {featureTitle} ===");
+                ReportingUtil.CreateScenario(scenarioTitle, featureTitle);
             }
             catch (Exception ex)
             {
