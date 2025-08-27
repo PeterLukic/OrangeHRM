@@ -9,6 +9,7 @@ namespace OrangeHRM.Tests.Pages
         private string UsernameInput => "input[name='username']";
         private string PasswordInput => "input[name='password']";
         private string LoginButton => "button[type='submit']";
+        private string LoginButtonFake => "button[type='submitFake']";
         private string ErrorMessage => ".oxd-alert-content-text";
         private string DashboardHeader => ".oxd-topbar-header-breadcrumb";
         private string LoadingSpinner => ".oxd-loading-spinner";
@@ -77,6 +78,25 @@ namespace OrangeHRM.Tests.Pages
                 Console.WriteLine("Clicking login button...");
                 await WaitForSelectorAsync(LoginButton);
                 await ClickAsync(LoginButton);
+                Console.WriteLine("Login button clicked");
+
+                // Wait for either success or failure response
+                await Task.Delay(2000);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to click login button: {ex.Message}");
+                throw;
+            }
+        }
+
+        public async Task ClickLoginButtonFakeAsync()
+        {
+            try
+            {
+                Console.WriteLine("Clicking login button...");
+                await WaitForSelectorAsync(LoginButton);
+                await ClickAsync(LoginButtonFake);
                 Console.WriteLine("Login button clicked");
 
                 // Wait for either success or failure response

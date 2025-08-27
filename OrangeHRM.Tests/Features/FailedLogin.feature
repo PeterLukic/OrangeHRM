@@ -6,6 +6,7 @@
 Background:
 	Given I am on the OrangeHRM login page
 
-Scenario: Failed login with empty credentials
-	When I enter username "" and password ""
-	And I click the login button
+@failedLogin
+Scenario: Failed login
+	When I enter username "Admin" and password "admin123"
+	And I click the login button with failed locator

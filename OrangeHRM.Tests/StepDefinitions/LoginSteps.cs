@@ -123,6 +123,32 @@ namespace OrangeHRM.Tests.StepDefinitions
             }
         }
 
+        [When(@"I click the login button with failed locator")]
+        public async Task WhenIClickTheLoginButtonFake()
+        {
+            var stepName = "I click the login button";
+            ReportingUtil.CreateStep(StepType.When, stepName);
+
+            try
+            {
+                Console.WriteLine("Clicking login button...");
+                await _loginPage.ClickLoginButtonFakeAsync();
+
+                // Wait a bit for the page to respond
+                await Task.Delay(2000);
+                Console.WriteLine("Login button clicked successfully");
+
+                // Log success to report
+                ReportingUtil.LogStep(StepType.When, stepName, Status.Pass, "Login button clicked and waiting for response");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to click login button: {ex.Message}");
+                ReportingUtil.LogStep(StepType.When, stepName, Status.Fail, ex.Message);
+                throw;
+            }
+        }
+
         [Then(@"I should be logged in successfully")]
         public async Task ThenIShouldBeLoggedInSuccessfully()
         {
